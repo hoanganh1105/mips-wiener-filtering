@@ -1,76 +1,91 @@
-# 📘 Wiener Filter Implementation in MIPS Assembly
-### Computer Architecture Lab – CO2008  
-### Ho Chi Minh City University of Technology (HCMUT)
+# 📉 Wiener Filter – MIPS Implementation
 
-## 📌 Overview
-This project implements the **Wiener Filter** in **MIPS Assembly** to perform signal denoising and compute the **Minimum Mean Square Error (MMSE)** between a desired signal and the filtered output.  
-The program reads input from `input.txt`, applies a predefined Wiener filter, outputs the filtered signal, computes MMSE, and writes the results to `output.txt`.
+## 📂 Cấu trúc Thư mục
 
-## 📂 Project Structure
-- main.asm — Main MIPS program  
-- wiener_data.asm — Predefined data and filter coefficients  
-- input.txt — Input signal (desired + noise)  
-- output.txt — Generated output  
-- README.md — Project documentation  
+| File                   | Mô tả                                                         |
+| ---------------------- | ------------------------------------------------------------- |
+| **wiener_mips.asm**    | Mã nguồn chính (MIPS). Chứa logic tính toán Filter và MMSE.   |
+| **wiener_ref.py**      | Code kiểm chứng (Python). Dùng để so sánh kết quả với MIPS.   |
+| **data_test_MIPS.txt** | 10 bộ Test Case cho MIPS (nhiễu trắng, nhiễu hồng, số âm...). |
+| **data_test_PY.txt**   | 10 bộ Test Case tương ứng cho Python.                         |
+| **output.txt**         | File kết quả đầu ra được sinh ra bởi chương trình MIPS.       |
 
-## 🚀 Features
-- Full Wiener filter pipeline implemented in MIPS  
-- Computes:  
-  - Filtered output y(n)  
-  - Error signal e(n)  
-  - MMSE value  
-- Validates input size  
-- Outputs results to both console and file  
-- Fully compatible with MARS MIPS simulator  
+---
 
-## 🧠 Technical Background
-### Filter Output
-y(n) = Σ hₖ · x(n − k)
+## 🛠️ Yêu cầu Hệ Thống
 
-### Error
-e(n) = d(n) − y(n)
+* **Java Runtime Environment (JRE)** để chạy MARS Simulator.
+* **MARS 4.5 Simulator** (file *Mars4_5.jar*).
+* **Python 3.x** để chạy script kiểm chứng.
 
-### MMSE
-MMSE = (1/N) · Σ (e(n))²
+---
 
-All operations are implemented using floating-point MIPS instructions.
+## 🚀 Hướng Dẫn Chạy Chương Trình
 
-## 📥 Input Format (input.txt)
-- Exactly **10 floating-point numbers**
-- Example:  
-6.7 3.7 7.0 3.5 7.0 3.5 3.5 7.0 3.8 2.1
+### **1. Khởi động MARS Simulator**
 
-## 📤 Output Format (output.txt)
-Example output:
-6.12 3.78 6.99 3.50 7.03 3.51 3.52 7.01 3.79 2.05  
-0.0345
+Có thể mở MARS thông qua dòng lệnh để đảm bảo môi trường Java hoạt động đúng.
 
-Line 1 → filtered signal  
-Line 2 → MMSE value  
+```bash
+java -jar "đường_dẫn_đến_file_Mars4_5.jar"
+```
 
-## 🛠️ How to Run (MARS)
-1. Open MARS  
-2. Load `main.asm`  
-3. Put `input.txt` in the same directory  
-4. Enable: Tools → Settings → “Allow pseudo instructions”  
-5. Assemble → Run  
-6. Output appears in console + generated file `output.txt`
+**Ví dụ Windows:**
 
-## 🧪 Test Cases
-Manual test cases were used to verify:  
-- Correct filtering  
-- Accurate MMSE computation  
-- Proper error handling  
+```bash
+java -jar "C:\Users\Student\Downloads\Mars4_5.jar"
+```
 
+**Ví dụ MacOS/Linux:**
 
-## 📄 Report
-Includes:  
-- Theory of Wiener Filter  
-- Pseudo-code & flowchart  
-- MIPS implementation explanation  
-- Test screenshots  
+```bash
+java -jar "/home/user/Downloads/Mars4_5.jar"
+```
 
-## ⚠️ Plagiarism Warning
-Similarity must be **under 50%**, verified with **MOSS**.
+---
 
-## ⭐ If this project helps you, please consider giving the repository a star!
+### **2. Nạp và chạy chương trình MIPS**
+
+1. Mở MARS → File → Open → **wiener_mips.asm**
+2. Nhấn **F3** để biên dịch
+3. Nhấn **F5** để chạy
+
+Kết quả hiển thị tại tab **Run I/O** và được lưu vào **output.txt**.
+
+---
+
+## 🧪 Thay Đổi Test Case
+
+1. Mở file **data_test_MIPS.txt**
+2. Chọn test case mong muốn
+3. Sao chép toàn bộ phần **[DATA SECTION]**
+4. Mở file **wiener_mips.asm**
+5. Dán đè vào phần `.data`
+6. Chạy lại chương trình
+
+---
+
+## 🐍 Kiểm Chứng Bằng Python
+
+1. Lấy dữ liệu từ **data_test_PY.txt**
+2. Cập nhật vào **wiener_ref.py**
+3. Chạy:
+
+```bash
+python wiener_ref.py
+```
+
+So sánh output & MMSE giữa Python và MIPS.
+
+---
+
+## 📊 Kết Quả Mẫu – Test Case "An Toàn"
+
+```text
+Filtered output: 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0
+MMSE: 0.2
+```
+
+*MMSE thực tế = 0.16 → làm tròn thành 0.2 theo yêu cầu đề bài.*
+
+---
