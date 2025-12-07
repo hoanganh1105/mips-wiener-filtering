@@ -1,36 +1,29 @@
 # =========================================================================
-# MERGED WIENER FILTER PROGRAM - FULL FILE READING VERSION (FIXED ALIGNMENT)
-# Bao gồm: ĐỌC FILE -> Tính toán hệ số -> Lọc tín hiệu -> Output
+# MERGED WIENER FILTER PROGRAM - FULL FILE READING VERSION (DYNAMIC M up to 10)
+# (Đã sửa: chỉ dùng thanh ghi MIPS hợp lệ)
 # =========================================================================
 
 .data
 # ---------------- CONFIG & DATA ----------------
 N: .word 10
-M: .word 3
+M: .word 10          # <-- Thay giá trị 1..10 tùy ý
 
 # --- FILE PATHS (SỬA ĐÚNG ĐƯỜNG DẪN CỦA BẠN NẾU CẦN) ---
-# Input signal file path
-fn_input:     .asciiz "D:/HCMUT/Computer Architecture/Assignment/input.txt"
-
-# Desired signal file path
-# Thêm align để đảm bảo biến tiếp theo ko bị lệch
+fn_input:     .asciiz "input.txt"
 .align 2 
-fn_desired:   .asciiz "D:/HCMUT/Computer Architecture/Assignment/desired.txt"
-
-# Output file path
+fn_desired:   .asciiz "desired.txt"
 .align 2
-filename:     .asciiz "D:/HCMUT/Computer Architecture/Assignment/output.txt"
+filename:     .asciiz "output.txt"
 
 # --- MẢNG DỮ LIỆU (KHÔNG CÒN HARD-CODE) ---
-# QUAN TRỌNG: Thêm .align 2 để căn chỉnh địa chỉ về bội số của 4
 .align 2 
-input_signal:   .space 40 
+input_signal:   .space 40          # N float (10*4)
 .align 2
 desired_signal: .space 40
 
 # --- Biến lưu kết quả ---
 .align 2
-optimize_coefficient: .float 0.0, 0.0, 0.0
+optimize_coefficient: .space 40    # Max M=10 -> 10*4 = 40 bytes
 .align 2
 output_signal:        .space 400
 .align 2
@@ -38,20 +31,16 @@ mmse:                 .float 0.0
 
 # --- Biến trung gian ---
 .align 2
-gamma_xx_0: .float 0.0
-gamma_xx_1: .float 0.0
-gamma_xx_2: .float 0.0
-gamma_dx_0: .float 0.0
-gamma_dx_1: .float 0.0
-gamma_dx_2: .float 0.0
+# gamma_xx[0..9], gamma_dx[0..9]
+gamma_xx:   .float 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+gamma_dx:   .float 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 
 .align 2
-R_matrix:   .float 0.0, 0.0, 0.0
-            .float 0.0, 0.0, 0.0
-            .float 0.0, 0.0, 0.0
+# R_matrix max 10x10 = 400 bytes
+R_matrix:   .space 400
 
 .align 2
-gamma_vector: .float 0.0, 0.0, 0.0
+gamma_vector: .space 40   # M floats max
 
 # --- Constants & Buffers ---
 .align 2
@@ -61,7 +50,6 @@ ten_f:        .float 10.0
 half_f:       .float 0.5
 neg_one_f:    .float -1.0
 
-# Buffer đọc file (2048 bytes là đủ cho file text nhỏ)
 .align 2
 file_buffer:  .space 2048 
 
@@ -81,73 +69,63 @@ int_buf:      .space 20
 .globl main
 
 # =========================================================================
-# MAIN PROGRAM FLOW
+# MAIN
 # =========================================================================
 main:
-    # ---------------------------------------------------------
-    # BƯỚC 0: ĐỌC DỮ LIỆU TỪ FILE (NEW FEATURE)
-    # ---------------------------------------------------------
-    
-    # 1. Đọc file Input
-    la $a0, fn_input       # Tên file
-    la $a1, input_signal   # Nơi lưu
-    jal read_file_proc     # Gọi hàm đọc
-    
-    # 2. Đọc file Desired
-    la $a0, fn_desired     # Tên file
-    la $a1, desired_signal # Nơi lưu
-    jal read_file_proc     # Gọi hàm đọc
-    
-    # Thông báo đọc xong
+    # Read input file
+    la $a0, fn_input
+    la $a1, input_signal
+    jal read_file_proc
+
+    # Read desired file
+    la $a0, fn_desired
+    la $a1, desired_signal
+    jal read_file_proc
+
+    # Print loaded
     li $v0, 4
     la $a0, msg_read_ok
     syscall
 
-    # ---------------------------------------------------------
-    # PHẦN 1: TÍNH TOÁN HỆ SỐ BỘ LỌC (Logic cũ)
-    # ---------------------------------------------------------
+    # Compute
     jal autoCorrelation
     jal crossCorrelation
     jal build_R_matrix
     jal solve_wiener_hopf
-    
+
     li $v0, 4
     la $a0, debug_msg
     syscall
 
-    # ---------------------------------------------------------
-    # PHẦN 2: LỌC TÍN HIỆU & TÍNH MMSE
-    # ---------------------------------------------------------
-    
-    # Mở file output
+    # Open output
     la $a0, filename
-    li $a1, 1        # Write-only
+    li $a1, 1
     li $a2, 0
     li $v0, 13
     syscall
-    move $s7, $v0    
+    move $s7, $v0
     blt $s7, 0, file_error
 
-    # Load tham số
+    # Load params for filtering/printing
     lw $s1, N
     lw $s0, M
     la $s2, optimize_coefficient
     la $s3, input_signal
     la $s4, desired_signal
     la $s5, output_signal
-    
-    li $t0, 0            
-    lwc1 $f20, float_zero 
+
+    li $t0, 0
+    lwc1 $f20, float_zero
 
 loop_calc:
-    bge $t0, $s1, done_calc 
-    lwc1 $f0, float_zero    
-    li $t1, 0               
+    bge $t0, $s1, done_calc
+    lwc1 $f0, float_zero
+    li $t1, 0
 
 inner_loop:
-    bge $t1, $s0, end_inner 
-    sub $t2, $t0, $t1       
-    blt $t2, $zero, skip_mul 
+    bge $t1, $s0, end_inner
+    sub $t2, $t0, $t1
+    blt $t2, $zero, skip_mul
 
     sll $t3, $t2, 2
     add $t3, $t3, $s3
@@ -172,10 +150,10 @@ end_inner:
     sll $t3, $t0, 2
     add $t3, $t3, $s4
     lwc1 $f8, 0($t3)
-    
+
     sub.s $f10, $f8, $f0
-    mul.s $f10, $f10, $f10 
-    add.s $f20, $f20, $f10 
+    mul.s $f10, $f10, $f10
+    add.s $f20, $f20, $f10
 
     addi $t0, $t0, 1
     j loop_calc
@@ -187,9 +165,7 @@ done_calc:
     la $t0, mmse
     swc1 $f18, 0($t0)
 
-    # ---------------------------------------------------------
-    # PHẦN 3: IN KẾT QUẢ
-    # ---------------------------------------------------------
+    # Print filtered header & then numbers
     la $a0, filtered_msg
     li $v0, 4
     syscall
@@ -199,35 +175,35 @@ done_calc:
     li $v0, 15
     syscall
 
-    li $s6, 0   
+    li $s6, 0
 
 loop_print:
     bge $s6, $s1, end_print
     sll $t0, $s6, 2
     add $t0, $t0, $s5
-    lwc1 $f12, 0($t0) 
+    lwc1 $f12, 0($t0)
 
-    # Rounding logic
+    # rounding to 1 decimal, MIPS style
     la $t0, ten_f
     lwc1 $f14, 0($t0)
     mul.s $f16, $f12, $f14
-    
+
     lwc1 $f30, float_zero
     la $t0, half_f
     lwc1 $f14, 0($t0)
-    
+
     c.lt.s $f16, $f30
     bc1f pos_round_y
-    sub.s $f16, $f16, $f14 
+    sub.s $f16, $f16, $f14
     j done_round_y
 pos_round_y:
-    add.s $f16, $f16, $f14 
+    add.s $f16, $f16, $f14
 done_round_y:
-    cvt.w.s $f16, $f16     
-    cvt.s.w $f12, $f16     
+    cvt.w.s $f16, $f16
+    cvt.s.w $f12, $f16
     la $t0, ten_f
     lwc1 $f14, 0($t0)
-    div.s $f12, $f12, $f14 
+    div.s $f12, $f12, $f14
 
     li $v0, 2
     syscall
@@ -305,98 +281,79 @@ read_error:
     syscall
 
 # =========================================================================
-# THỦ TỤC ĐỌC FILE FLOAT (NÂNG CAO)
-# $a0: Tên file
-# $a1: Địa chỉ mảng đích
+# read_file_proc (giữ nguyên)
 # =========================================================================
 read_file_proc:
-    # Lưu thanh ghi
     addi $sp, $sp, -20
     sw $ra, 0($sp)
-    sw $s0, 4($sp) # File Desc
-    sw $s1, 8($sp) # Array Ptr
-    sw $s2, 12($sp) # Buffer Ptr
-    sw $s3, 16($sp) # Bytes Read
+    sw $s0, 4($sp)
+    sw $s1, 8($sp)
+    sw $s2, 12($sp)
+    sw $s3, 16($sp)
 
-    move $s1, $a1   # Lưu địa chỉ mảng đích
+    move $s1, $a1
 
-    # 1. Mở file
-    li $a1, 0       # Read-only
+    li $a1, 0
     li $a2, 0
     li $v0, 13
     syscall
     move $s0, $v0
     blt $s0, 0, read_error
 
-    # 2. Đọc toàn bộ file vào buffer
     move $a0, $s0
     la $a1, file_buffer
-    li $a2, 2048    # Max bytes
+    li $a2, 2048
     li $v0, 14
     syscall
-    move $s3, $v0   # Số byte thực đọc
-    
-    # Đóng file
+    move $s3, $v0
+
     move $a0, $s0
     li $v0, 16
     syscall
-    
-    # 3. Parse Buffer
-    la $s2, file_buffer # Con trỏ duyệt buffer
-    add $s3, $s2, $s3   # Con trỏ kết thúc (Buffer + BytesRead)
-    
-    li $t8, 0           # Count (đếm số lượng số đã đọc, max 10)
-    li $t9, 10          # Max N
+
+    la $s2, file_buffer
+    add $s3, $s2, $s3
+
+    li $t8, 0
+    li $t9, 10
 
 parse_loop:
-    bge $t8, $t9, done_parse # Đủ 10 số thì dừng
-    bge $s2, $s3, done_parse # Hết buffer thì dừng
+    bge $t8, $t9, done_parse
+    bge $s2, $s3, done_parse
 
-    # --- Parser Float Logic ---
-    # Init: result = 0.0, sign = 1.0, is_fraction = 0, divisor = 1.0
-    lwc1 $f0, float_zero   # Total val
-    lwc1 $f1, float_one    # Sign
-    lwc1 $f2, ten_f        # Constant 10.0
-    lwc1 $f3, float_one    # Divisor (cho phần thập phân)
-    li $t0, 0              # flag: đang ở phần thập phân? (0=No, 1=Yes)
-    li $t1, 0              # flag: có số nào được đọc chưa?
-    
+    lwc1 $f0, float_zero
+    lwc1 $f1, float_one
+    lwc1 $f2, ten_f
+    lwc1 $f3, float_one
+    li $t0, 0
+    li $t1, 0
+
 skip_spaces:
-    bge $s2, $s3, finish_num # Check EOF
-    lb $t2, 0($s2)           # Load char
-    
-    # Check delimiters (Space, Tab, Newline, CR)
+    bge $s2, $s3, finish_num
+    lb $t2, 0($s2)
     beq $t2, 32, check_finish
-    beq $t2, 9,  check_finish
+    beq $t2, 9, check_finish
     beq $t2, 10, check_finish
     beq $t2, 13, check_finish
-    
-    # Check minus sign
     beq $t2, 45, is_minus
-    # Check dot
     beq $t2, 46, is_dot
-    
-    # Is Digit? (48-57)
     blt $t2, 48, next_char
     bgt $t2, 57, next_char
-    
-    # Process Digit
-    li $t1, 1                # Mark: found digit
-    sub $t2, $t2, 48         # ASCII to int
+
+    li $t1, 1
+    sub $t2, $t2, 48
     mtc1 $t2, $f4
-    cvt.s.w $f4, $f4         # Convert to float
-    
+    cvt.s.w $f4, $f4
+
     beq $t0, 1, process_fraction
-    
-    # Process Integer Part: total = total * 10 + digit
+
     mul.s $f0, $f0, $f2
     add.s $f0, $f0, $f4
     j next_char
 
 process_fraction:
-    # Process Fraction Part: divisor *= 10; total += digit / divisor
-    mul.s $f3, $f3, $f2      # divisor *= 10
-    div.s $f4, $f4, $f3      # digit / divisor
+    mul.s $f3, $f3, $f2
+    div.s $f4, $f4, $f3
     add.s $f0, $f0, $f4
     j next_char
 
@@ -405,13 +362,11 @@ is_minus:
     j next_char
 
 is_dot:
-    li $t0, 1               # Bật cờ thập phân
+    li $t0, 1
     j next_char
 
 check_finish:
-    # Nếu gặp delimiter mà chưa đọc được số nào -> Bỏ qua (đây là khoảng trắng đầu dòng)
     beqz $t1, next_char
-    # Nếu đã đọc được số -> Lưu số và reset
     j finish_num
 
 next_char:
@@ -419,20 +374,17 @@ next_char:
     j skip_spaces
 
 finish_num:
-    beqz $t1, really_done # Nếu không có số nào để lưu
-    
-    # Kết thúc 1 số: Lưu vào mảng
-    mul.s $f0, $f0, $f1   # Apply sign
-    swc1 $f0, 0($s1)      # Store to array
-    addi $s1, $s1, 4      # Next array slot
-    addi $t8, $t8, 1      # Count++
-    
-    addi $s2, $s2, 1      # Move past the delimiter
+    beqz $t1, really_done
+
+    mul.s $f0, $f0, $f1
+    swc1 $f0, 0($s1)
+    addi $s1, $s1, 4
+    addi $t8, $t8, 1
+
+    addi $s2, $s2, 1
     j parse_loop
 
 really_done:
-    # Case đặc biệt: File kết thúc ngay sau số cuối cùng mà không có khoảng trắng
-    # Logic trên đã xử lý (bge $s2, $s3) nhưng để chắc chắn:
     j done_parse
 
 done_parse:
@@ -445,240 +397,431 @@ done_parse:
     jr $ra
 
 # =========================================================================
-# PROCEDURES (MATH) & I/O - GIỮ NGUYÊN
+# autoCorrelation (BIASSED)
+# gamma_xx[k] = (1/N) * sum_{n=k..N-1} x[n] * x[n-k]
 # =========================================================================
-
 autoCorrelation:
-    li $t0, 0               
-    lw $t1, M
-    lw $t2, N
-autoCorr_outer:
-    bge $t0, $t1, autoCorr_done
-    li $t3, 0               
-    lwc1 $f4, float_zero    
-autoCorr_inner:
-    sub $t4, $t2, $t0       
-    bge $t3, $t4, autoCorr_inner_done
-    
-    sll $t5, $t3, 2
-    la $t9, input_signal 
-    add $t6, $t5, $t9
-    lwc1 $f0, 0($t6)
-    
-    add $t7, $t3, $t0
-    sll $t7, $t7, 2
-    la $t9, input_signal
-    add $t8, $t7, $t9
-    lwc1 $f1, 0($t8)
-    
-    mul.s $f2, $f0, $f1
-    add.s $f4, $f4, $f2
-    addi $t3, $t3, 1
-    j autoCorr_inner
-    
-autoCorr_inner_done:
-    mtc1 $t2, $f5           
-    cvt.s.w $f5, $f5
-    div.s $f4, $f4, $f5     
-    
-    beq $t0, 0, store_gamma0
-    beq $t0, 1, store_gamma1
-    beq $t0, 2, store_gamma2
-    j skip_store_xx
-store_gamma0: 
-    s.s $f4, gamma_xx_0
-    j skip_store_xx
-store_gamma1: 
-    s.s $f4, gamma_xx_1
-    j skip_store_xx
-store_gamma2: 
-    s.s $f4, gamma_xx_2
-skip_store_xx:
-    addi $t0, $t0, 1
-    j autoCorr_outer
-autoCorr_done:
-    jr $ra
+    lw $t3, M        # M
+    lw $t4, N        # N
+    addi $t0, $zero, 0       # k = 0
 
-crossCorrelation:
-    li $t0, 0
-    lw $t1, M
-    lw $t2, N
-crossCorr_outer:
-    bge $t0, $t1, crossCorr_done
-    li $t3, 0
-    lwc1 $f4, float_zero
-crossCorr_inner:
-    sub $t4, $t2, $t0
-    bge $t3, $t4, crossCorr_inner_done
-    
-    sll $t5, $t3, 2
-    la $t6, desired_signal
+autoCorr_outer:
+    bge $t0, $t3, autoCorr_done
+
+    lwc1 $f4, float_zero      # sum = 0.0
+    move $t1, $t0             # n = k
+
+autoCorr_inner:
+    bge $t1, $t4, autoCorr_inner_done
+
+    # load x[n]
+    sll $t5, $t1, 2
+    la $t6, input_signal
     add $t6, $t6, $t5
     lwc1 $f0, 0($t6)
-    
-    add $t7, $t3, $t0
+
+    # load x[n-k]
+    sub $t7, $t1, $t0
     sll $t7, $t7, 2
     la $t8, input_signal
     add $t8, $t8, $t7
     lwc1 $f1, 0($t8)
-    
+
     mul.s $f2, $f0, $f1
     add.s $f4, $f4, $f2
-    addi $t3, $t3, 1
-    j crossCorr_inner
-    
-crossCorr_inner_done:
-    mtc1 $t2, $f5
+
+    addi $t1, $t1, 1
+    j autoCorr_inner
+
+autoCorr_inner_done:
+    # divide by N (BIAS)
+    mtc1 $t4, $f5
     cvt.s.w $f5, $f5
     div.s $f4, $f4, $f5
-    
-    beq $t0, 0, store_dx0
-    beq $t0, 1, store_dx1
-    beq $t0, 2, store_dx2
-    j skip_store_dx
-store_dx0:
-    s.s $f4, gamma_dx_0
-    la $t9, gamma_vector
-    s.s $f4, 0($t9)
-    j skip_store_dx
-store_dx1:
-    s.s $f4, gamma_dx_1 
-    la $t9, gamma_vector
-    s.s $f4, 4($t9)
-    j skip_store_dx
-store_dx2:
-    s.s $f4, gamma_dx_2
-    la $t9, gamma_vector
-    s.s $f4, 8($t9)
-skip_store_dx:
+
+    # store gamma_xx[k]
+    la $t6, gamma_xx
+    sll $t7, $t0, 2
+    add $t6, $t6, $t7
+    swc1 $f4, 0($t6)
+
+    addi $t0, $t0, 1
+    j autoCorr_outer
+
+autoCorr_done:
+    jr $ra
+
+
+# =========================================================================
+# crossCorrelation (BIASSED)
+# gamma_dx[k] = (1/N) * sum_{n=k..N-1} d[n] * x[n-k]
+# =========================================================================
+crossCorrelation:
+    lw $t3, M
+    lw $t4, N
+    addi $t0, $zero, 0    # k = 0
+
+crossCorr_outer:
+    bge $t0, $t3, crossCorr_done
+
+    lwc1 $f4, float_zero  # sum = 0.0
+    move $t1, $t0         # n = k
+
+crossCorr_inner:
+    bge $t1, $t4, crossCorr_inner_done
+
+    # load d[n]
+    sll $t5, $t1, 2
+    la $t6, desired_signal
+    add $t6, $t6, $t5
+    lwc1 $f0, 0($t6)
+
+    # load x[n-k]
+    sub $t7, $t1, $t0
+    sll $t7, $t7, 2
+    la $t8, input_signal
+    add $t8, $t8, $t7
+    lwc1 $f1, 0($t8)
+
+    mul.s $f2, $f0, $f1
+    add.s $f4, $f4, $f2
+
+    addi $t1, $t1, 1
+    j crossCorr_inner
+
+crossCorr_inner_done:
+    # divide by N (BIAS)
+    mtc1 $t4, $f5
+    cvt.s.w $f5, $f5
+    div.s $f4, $f4, $f5
+
+    # store gamma_dx[k] and gamma_vector[k]
+    la $t6, gamma_dx
+    sll $t7, $t0, 2
+    add $t6, $t6, $t7
+    swc1 $f4, 0($t6)
+
+    la $t6, gamma_vector
+    add $t6, $t6, $t7
+    swc1 $f4, 0($t6)
+
     addi $t0, $t0, 1
     j crossCorr_outer
+
 crossCorr_done:
     jr $ra
 
+
+# =========================================================================
+# build_R_matrix: fill full MxM Toeplitz matrix from gamma_xx
+# R[i][j] = gamma_xx[abs(i-j)]
+# R_matrix stored row-major, max size 10x10
+# Registers:
+#  $t3=M, $t0=i, $t1=j, $t2=diff, $t5..$t7 temp
+# floats use $f0
+# =========================================================================
 build_R_matrix:
-    lwc1 $f0, gamma_xx_0
-    la $t9, R_matrix
-    s.s $f0, 0($t9)
-    s.s $f0, 16($t9)
-    s.s $f0, 32($t9)
+    lw $t3, M          # M
+    la $t1, R_matrix   # reuse $t1 for base later (but we'll load per entry)
+    la $t2, gamma_xx
 
-    lwc1 $f1, gamma_xx_1
-    s.s $f1, 4($t9)
-    s.s $f1, 12($t9)
-    s.s $f1, 20($t9)
-    s.s $f1, 28($t9)
-
-    lwc1 $f2, gamma_xx_2
-    s.s $f2, 8($t9)
-    s.s $f2, 24($t9)
+    addi $t0, $zero, 0   # i = 0
+build_row_loop:
+    bge $t0, $t3, build_done
+    addi $t1, $zero, 0   # j = 0
+build_col_loop:
+    bge $t1, $t3, next_row_build
+    # diff = abs(i-j)
+    sub $t2, $t0, $t1
+    bltz $t2, pos_diff
+    j use_diff
+pos_diff:
+    sub $t2, $zero, $t2
+use_diff:
+    # load gamma_xx[diff]
+    sll $t4, $t2, 2
+    la $t5, gamma_xx
+    add $t5, $t5, $t4
+    lwc1 $f0, 0($t5)
+    # store to R_matrix[i][j] at offset ((i*M + j)*4)
+    mul $t6, $t0, $t3        # t6 = i*M
+    add $t6, $t6, $t1        # i*M + j
+    sll $t6, $t6, 2
+    la $t7, R_matrix
+    add $t7, $t7, $t6
+    s.s $f0, 0($t7)
+    addi $t1, $t1, 1
+    j build_col_loop
+next_row_build:
+    addi $t0, $t0, 1
+    j build_row_loop
+build_done:
     jr $ra
 
+# =========================================================================
+# solve_wiener_hopf: Gaussian elimination + back substitution
+# Works for M = 1..10
+# Registers mapping used in this routine:
+#  $t3 = M
+#  $t0 = i (outer loop)
+#  $t1 = j (inner)
+#  $t2 = k (row index)
+#  $t4..$t9 temporary integer regs for addresses
+# Float mapping in this routine:
+#  $f14 = pivot
+#  $f12 = zero (we will load float_zero into $f12)
+#  $f2, $f4, $f6, $f8, $f10 used as temps
+# =========================================================================
 solve_wiener_hopf:
-    la $t9, R_matrix
-    lwc1 $f0, 0($t9)     
-    lwc1 $f1, 4($t9)     
-    lwc1 $f2, 8($t9)     
-    lwc1 $f3, 16($t9)    
-    lwc1 $f4, 20($t9)    
-    lwc1 $f5, 32($t9)    
-    
-    la $t9, gamma_vector    
-    lwc1 $f6, 0($t9)     
-    lwc1 $f7, 4($t9)     
-    lwc1 $f8, 8($t9)     
+    lw $t3, M
+    la $t4, R_matrix
+    la $t5, gamma_vector
+    la $t6, optimize_coefficient
 
-    mul.s $f9, $f0, $f0
-    mul.s $f9, $f9, $f0      
-    
-    mul.s $f10, $f0, $f1
-    mul.s $f10, $f10, $f1
-    add.s $f10, $f10, $f10   
-    
-    mul.s $f11, $f1, $f1
-    mul.s $f11, $f11, $f2
-    add.s $f11, $f11, $f11   
-    
-    mul.s $f12, $f0, $f2
-    mul.s $f12, $f12, $f2    
-    
-    sub.s $f13, $f9, $f10
-    add.s $f13, $f13, $f11
-    sub.s $f13, $f13, $f12
-    mov.s $f30, $f13         
-    
-    lwc1 $f14, float_zero
-    c.eq.s $f30, $f14
-    bc1t singular_det
-    
-    mul.s $f15, $f3, $f5
-    mul.s $f16, $f4, $f4
-    sub.s $f17, $f15, $f16 
-    
-    mul.s $f15, $f1, $f5
-    mul.s $f16, $f2, $f4
-    sub.s $f18, $f16, $f15 
-    
-    mul.s $f15, $f1, $f4
-    mul.s $f16, $f2, $f3
-    sub.s $f19, $f15, $f16 
-    
-    mov.s $f20, $f18         
-    
-    mul.s $f15, $f0, $f5
-    mul.s $f16, $f2, $f2
-    sub.s $f21, $f15, $f16 
-    
-    mul.s $f15, $f0, $f4
-    mul.s $f16, $f1, $f2
-    sub.s $f22, $f16, $f15 
-    
-    mov.s $f23, $f19         
-    mov.s $f24, $f22         
-    mov.s $f25, $f17         
-    
-    div.s $f17, $f17, $f30
-    div.s $f18, $f18, $f30
-    div.s $f19, $f19, $f30
-    div.s $f20, $f20, $f30
-    div.s $f21, $f21, $f30
-    div.s $f22, $f22, $f30
-    div.s $f23, $f23, $f30
-    div.s $f24, $f24, $f30
-    div.s $f25, $f25, $f30
-    
-    la $t9, optimize_coefficient
-    mul.s $f26, $f17, $f6
-    mul.s $f27, $f18, $f7
-    add.s $f26, $f26, $f27
-    mul.s $f27, $f19, $f8
-    add.s $f26, $f26, $f27
-    s.s $f26, 0($t9)
-    
-    mul.s $f26, $f20, $f6
-    mul.s $f27, $f21, $f7
-    add.s $f26, $f26, $f27
-    mul.s $f27, $f22, $f8
-    add.s $f26, $f26, $f27
-    s.s $f26, 4($t9)
-    
-    mul.s $f26, $f23, $f6
-    mul.s $f27, $f24, $f7
-    add.s $f26, $f26, $f27
-    mul.s $f27, $f25, $f8
-    add.s $f26, $f26, $f27
-    s.s $f26, 8($t9)
-    
-    j solve_done
+    # Zero out optimize_coefficient area first (0..M-1)
+    addi $t0, $zero, 0
+zero_x_loop:
+    bge $t0, $t3, zero_x_done
+    sll $t1, $t0, 2
+    la $t7, optimize_coefficient
+    add $t7, $t7, $t1
+    lwc1 $f2, float_zero
+    s.s $f2, 0($t7)
+    addi $t0, $t0, 1
+    j zero_x_loop
+zero_x_done:
 
-singular_det:
-    la $t9, optimize_coefficient
-    lwc1 $f15, float_one
-    s.s $f15, 0($t9) 
+    # load float zero into $f12 for comparisons
+    lwc1 $f12, float_zero
 
-solve_done:
+    # Forward elimination
+    addi $t0, $zero, 0    # i = 0
+elim_outer:
+    bge $t0, $t3, elim_done
+
+    # pivot = R[i][i]
+    mul $t7, $t0, $t3        # i*M
+    add $t7, $t7, $t0        # i*M + i
+    sll $t7, $t7, 2
+    la $t8, R_matrix
+    add $t8, $t8, $t7
+    lwc1 $f14, 0($t8)        # pivot in $f14
+
+    # if pivot == 0 -> try swap with row k>i where R[k][i] != 0
+    c.eq.s $f14, $f12
+    bc1f pivot_nonzero
+
+    # find row to swap: k = i+1..M-1
+    addi $t2, $t0, 1
+find_swap:
+    bge $t2, $t3, singular_case   # none found
+    mul $t9, $t2, $t3
+    add $t9, $t9, $t0
+    sll $t9, $t9, 2
+    la $t7, R_matrix
+    add $t7, $t7, $t9
+    lwc1 $f2, 0($t7)
+    c.eq.s $f2, $f12
+    bc1t no_swap_here
+    # found non-zero pivot at row k -> swap row i and k
+    addi $t1, $zero, 0           # j = 0
+swap_row_loop:
+    bge $t1, $t3, swap_done
+    # addr_i = R[i][j]
+    mul $t9, $t0, $t3
+    add $t9, $t9, $t1
+    sll $t9, $t9, 2
+    la $t7, R_matrix
+    add $t7, $t7, $t9
+    lwc1 $f4, 0($t7)
+    # addr_k = R[k][j]
+    mul $t9, $t2, $t3
+    add $t9, $t9, $t1
+    sll $t9, $t9, 2
+    la $t8, R_matrix
+    add $t8, $t8, $t9
+    lwc1 $f6, 0($t8)
+    # swap: store f6 into addr_i, f4 into addr_k
+    s.s $f6, 0($t7)
+    s.s $f4, 0($t8)
+    addi $t1, $t1, 1
+    j swap_row_loop
+swap_done:
+    # swap gamma_vector[i] and gamma_vector[k]
+    sll $t9, $t0, 2
+    la $t7, gamma_vector
+    add $t7, $t7, $t9
+    lwc1 $f4, 0($t7)
+    sll $t9, $t2, 2
+    la $t8, gamma_vector
+    add $t8, $t8, $t9
+    lwc1 $f6, 0($t8)
+    s.s $f6, 0($t7)
+    s.s $f4, 0($t8)
+
+    # reload pivot after swap
+    mul $t7, $t0, $t3
+    add $t7, $t7, $t0
+    sll $t7, $t7, 2
+    la $t8, R_matrix
+    add $t8, $t8, $t7
+    lwc1 $f14, 0($t8)
+    j pivot_ready
+
+no_swap_here:
+    addi $t2, $t2, 1
+    j find_swap
+
+singular_case:
+    # set x[0]=1, others 0 and return
+    la $t7, optimize_coefficient
+    lwc1 $f2, float_one
+    s.s $f2, 0($t7)
+    lwc1 $f2, float_zero
+    addi $t7, $t7, 4
+    addi $t9, $zero, 1
+sing_loop:
+    bge $t9, $t3, singular_done
+    s.s $f2, 0($t7)
+    addi $t7, $t7, 4
+    addi $t9, $t9, 1
+    j sing_loop
+singular_done:
     jr $ra
 
+pivot_nonzero:
+pivot_ready:
+    # normalize row i: divide row elements j=i..M-1 by pivot
+    addi $t1, $zero, 0
+norm_loop:
+    bge $t1, $t3, norm_done
+    blt $t1, $t0, skip_norm_elem
+    # addr = R[i][j]
+    mul $t9, $t0, $t3
+    add $t9, $t9, $t1
+    sll $t9, $t9, 2
+    la $t7, R_matrix
+    add $t7, $t7, $t9
+    lwc1 $f4, 0($t7)
+    div.s $f6, $f4, $f14
+    s.s $f6, 0($t7)
+skip_norm_elem:
+    addi $t1, $t1, 1
+    j norm_loop
+norm_done:
+    # normalize gamma_vector[i]
+    sll $t9, $t0, 2
+    la $t7, gamma_vector
+    add $t7, $t7, $t9
+    lwc1 $f4, 0($t7)
+    div.s $f6, $f4, $f14
+    s.s $f6, 0($t7)
+
+    # eliminate below rows k = i+1..M-1
+    addi $t2, $t0, 1
+elim_k_loop:
+    bge $t2, $t3, next_i
+    # factor = R[k][i]
+    mul $t9, $t2, $t3
+    add $t9, $t9, $t0
+    sll $t9, $t9, 2
+    la $t7, R_matrix
+    add $t7, $t7, $t9
+    lwc1 $f8, 0($t7)    # factor
+
+    # for j = i..M-1: R[k][j] -= factor * R[i][j]
+    addi $t1, $t0, 0
+elim_inner:
+    bge $t1, $t3, elim_done_inner
+    # addr_kj
+    mul $t9, $t2, $t3
+    add $t9, $t9, $t1
+    sll $t9, $t9, 2
+    la $t7, R_matrix
+    add $t7, $t7, $t9
+    lwc1 $f4, 0($t7)        # R[k][j]
+    # addr_ij
+    mul $t9, $t0, $t3
+    add $t9, $t9, $t1
+    sll $t9, $t9, 2
+    la $t8, R_matrix
+    add $t8, $t8, $t9
+    lwc1 $f6, 0($t8)        # R[i][j]
+    # compute new = kj - factor * ij
+    mul.s $f10, $f8, $f6
+    sub.s $f2, $f4, $f10
+    s.s $f2, 0($t7)
+    addi $t1, $t1, 1
+    j elim_inner
+elim_done_inner:
+    # gamma_vector[k] -= factor * gamma_vector[i]
+    sll $t9, $t2, 2
+    la $t7, gamma_vector
+    add $t7, $t7, $t9
+    lwc1 $f4, 0($t7)   # gk
+    sll $t9, $t0, 2
+    la $t8, gamma_vector
+    add $t8, $t8, $t9
+    lwc1 $f6, 0($t8)   # gi
+    mul.s $f10, $f8, $f6
+    sub.s $f2, $f4, $f10
+    s.s $f2, 0($t7)
+
+    addi $t2, $t2, 1
+    j elim_k_loop
+
+next_i:
+    addi $t0, $t0, 1
+    j elim_outer
+
+elim_done:
+    # Back substitution: compute x[M-1..0]
+    add $t0, $t3, $zero
+    addi $t0, $t0, -1   # i = M-1
+back_sub_i:
+    blt $t0, $zero, back_sub_done
+    # val = gamma_vector[i]
+    sll $t9, $t0, 2
+    la $t7, gamma_vector
+    add $t7, $t7, $t9
+    lwc1 $f4, 0($t7)       # val
+
+    # for j = i+1..M-1: val -= R[i][j] * x[j]
+    addi $t1, $t0, 1
+back_inner:
+    bge $t1, $t3, store_xi
+    # load R[i][j]
+    mul $t9, $t0, $t3
+    add $t9, $t9, $t1
+    sll $t9, $t9, 2
+    la $t7, R_matrix
+    add $t7, $t7, $t9
+    lwc1 $f6, 0($t7)
+    # load x[j]
+    sll $t9, $t1, 2
+    la $t8, optimize_coefficient
+    add $t8, $t8, $t9
+    lwc1 $f8, 0($t8)
+    mul.s $f10, $f6, $f8
+    sub.s $f4, $f4, $f10
+    addi $t1, $t1, 1
+    j back_inner
+
+store_xi:
+    # store f4 to optimize_coefficient[i]
+    sll $t9, $t0, 2
+    la $t7, optimize_coefficient
+    add $t7, $t7, $t9
+    s.s $f4, 0($t7)
+    addi $t0, $t0, -1
+    j back_sub_i
+
+back_sub_done:
+    jr $ra
+
+# =========================================================================
+# write_float_proc & write_int_proc (giữ nguyên)
+# =========================================================================
 write_float_proc:
     addi $sp, $sp, -12
     sw $ra, 0($sp)
