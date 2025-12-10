@@ -1,46 +1,41 @@
-# =========================================================================
-# MERGED WIENER FILTER PROGRAM - FULL FILE READING VERSION (DYNAMIC M up to 10)
-# =========================================================================
-
 .data
 # ---------------- CONFIG & DATA ----------------
-N: .word 10
-M: .word 10          
+N: .word 10                  # Kích thước bắt buộc
+M: .word 10                  # Filter order
 
+# --- FILE PATHS ---
 fn_input:     .asciiz "input.txt"
 .align 2 
 fn_desired:   .asciiz "desired.txt"
 .align 2
 filename:     .asciiz "output.txt"
 
-
+# --- DATA BUFFERS ---
 .align 2 
-input_signal:   .space 40          # N float (10*4)
+input_signal:   .space 40          # 10 float * 4 bytes
 .align 2
 desired_signal: .space 40
 
-
+# --- RESULT VARIABLES ---
 .align 2
-optimize_coefficient: .space 40    # Max M=10 -> 10*4 = 40 bytes
+optimize_coefficient: .space 40    
 .align 2
 output_signal:        .space 400
 .align 2
 mmse:                 .float 0.0
 
-# --- Biáº¿n trung gian ---
+# --- INTERMEDIATE VARIABLES ---
 .align 2
-# gamma_xx[0..9], gamma_dx[0..9]
 gamma_xx:   .float 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 gamma_dx:   .float 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
 
 .align 2
-# R_matrix max 10x10 = 400 bytes
 R_matrix:   .space 400
 
 .align 2
-gamma_vector: .space 40   # M floats max
+gamma_vector: .space 40
 
-# --- Constants & Buffers ---
+# --- CONSTANTS & STRINGS ---
 .align 2
 float_zero:   .float 0.0
 float_one:    .float 1.0
@@ -57,10 +52,13 @@ space:        .asciiz " "
 nl:           .asciiz "\n"
 minus:        .asciiz "-"
 dot:          .asciiz "."
+
+# --- ERROR MESSAGES ---
 err_msg:      .asciiz "Error: cannot open output file\n"
 err_read_msg: .asciiz "Error: cannot open input/desired file\n"
-debug_msg:    .asciiz "--- Calculation Done. Applying Filter... ---\n"
-msg_read_ok:  .asciiz "--- Files Loaded Successfully ---\n"
+# Chuỗi lỗi này dài 21 ký tự
+err_size_msg: .asciiz "Error: size not match" 
+
 int_buf:      .space 20
 
 .text
@@ -70,32 +68,34 @@ int_buf:      .space 20
 # MAIN
 # =========================================================================
 main:
-    # Read input file
+    # Load N (Expected Size) into $s5
+    lw $s5, N
+
+    # 1. Read Input File
     la $a0, fn_input
     la $a1, input_signal
     jal read_file_proc
+    move $s6, $v0           # $s6 = Actual size of Input
 
-    # Read desired file
+    # Check Input Size: Must equal N (10)
+    bne $s6, $s5, size_mismatch_error
+
+    # 2. Read Desired File
     la $a0, fn_desired
     la $a1, desired_signal
     jal read_file_proc
+    move $s7, $v0           # $s7 = Actual size of Desired
 
-    # Print loaded
-    li $v0, 4
-    la $a0, msg_read_ok
-    syscall
+    # Check Desired Size: Must equal N (10)
+    bne $s7, $s5, size_mismatch_error
 
-    # Compute
+    # --- Calculation Start (Only if sizes match) ---
     jal autoCorrelation
     jal crossCorrelation
     jal build_R_matrix
     jal solve_wiener_hopf
 
-    li $v0, 4
-    la $a0, debug_msg
-    syscall
-
-    # Open output
+    # Open output file for Result Writing
     la $a0, filename
     li $a1, 1
     li $a2, 0
@@ -104,11 +104,11 @@ main:
     move $s7, $v0
     blt $s7, 0, file_error
 
-	jal filter_and_mmse
-	lw $s1, N
-	la $s5, output_signal
+    jal filter_and_mmse
+    lw $s1, N
+    la $s5, output_signal
 
-    # Print filtered header & then numbers
+    # Print filtered header
     la $a0, filtered_msg
     li $v0, 4
     syscall
@@ -126,15 +126,13 @@ loop_print:
     add $t0, $t0, $s5
     lwc1 $f12, 0($t0)
 
-    # rounding to 1 decimal, MIPS style
+    # Rounding for Console (Syscall 2)
     la $t0, ten_f
     lwc1 $f14, 0($t0)
     mul.s $f16, $f12, $f14
-
     lwc1 $f30, float_zero
     la $t0, half_f
     lwc1 $f14, 0($t0)
-
     c.lt.s $f16, $f30
     bc1f pos_round_y
     sub.s $f16, $f16, $f14
@@ -154,6 +152,7 @@ done_round_y:
     li $v0, 4
     syscall
 
+    # Write to File
     jal write_float_proc
     move $a0, $s7
     la $a1, space
@@ -185,7 +184,6 @@ end_print:
 
     la $t0, mmse
     lwc1 $f12, 0($t0)
-
     la $t0, ten_f
     lwc1 $f14, 0($t0)
     mul.s $f16, $f12, $f14
@@ -209,6 +207,42 @@ end_print:
     li $v0, 10
     syscall
 
+# --- ERROR HANDLERS ---
+
+# Xử lý khi kích thước file không đúng (ghi ra cả Console và File)
+size_mismatch_error:
+    # 1. In lỗi ra Console
+    la $a0, err_size_msg
+    li $v0, 4
+    syscall
+    
+    # 2. Mở file output.txt để ghi lỗi
+    la $a0, filename
+    li $a1, 1      # Flag 1: Write only (Create/Truncate)
+    li $a2, 0
+    li $v0, 13
+    syscall
+    move $s7, $v0  # Lưu file descriptor vào $s7
+    
+    # Nếu không mở được file thì chỉ thoát
+    blt $s7, 0, exit_mismatch
+
+    # 3. Ghi chuỗi lỗi vào file
+    move $a0, $s7
+    la $a1, err_size_msg
+    li $a2, 21     # Độ dài chuỗi "Error: size not match" là 21
+    li $v0, 15
+    syscall
+
+    # 4. Đóng file
+    move $a0, $s7
+    li $v0, 16
+    syscall
+
+exit_mismatch:
+    li $v0, 10
+    syscall
+
 file_error:
     la $a0, err_msg
     li $v0, 4
@@ -224,7 +258,7 @@ read_error:
     syscall
 
 # =========================================================================
-# read_file_proc (giá»¯ nguyĂªn)
+# read_file_proc
 # =========================================================================
 read_file_proc:
     addi $sp, $sp, -20
@@ -236,6 +270,7 @@ read_file_proc:
 
     move $s1, $a1
 
+    # Open file
     li $a1, 0
     li $a2, 0
     li $v0, 13
@@ -243,13 +278,15 @@ read_file_proc:
     move $s0, $v0
     blt $s0, 0, read_error
 
+    # Read content
     move $a0, $s0
     la $a1, file_buffer
     li $a2, 2048
     li $v0, 14
     syscall
     move $s3, $v0
-
+    
+    # Close file
     move $a0, $s0
     li $v0, 16
     syscall
@@ -257,11 +294,10 @@ read_file_proc:
     la $s2, file_buffer
     add $s3, $s2, $s3
 
-    li $t8, 0
-    li $t9, 10
+    li $t8, 0          # Count parsed numbers
 
 parse_loop:
-    bge $t8, $t9, done_parse
+    # Removed explicit loop limit check vs N here to allow counting overflow
     bge $s2, $s3, done_parse
 
     lwc1 $f0, float_zero
@@ -318,11 +354,16 @@ next_char:
 
 finish_num:
     beqz $t1, really_done
-
+    
+    lw $t9, N
+    bge $t8, $t9, skip_store  # Nếu đã đủ 10 số, chỉ tăng biến đếm, không lưu
+    
     mul.s $f0, $f0, $f1
     swc1 $f0, 0($s1)
     addi $s1, $s1, 4
-    addi $t8, $t8, 1
+
+skip_store:
+    addi $t8, $t8, 1          # Luôn tăng biến đếm
 
     addi $s2, $s2, 1
     j parse_loop
@@ -331,6 +372,8 @@ really_done:
     j done_parse
 
 done_parse:
+    move $v0, $t8       # Trả về tổng số phần tử tìm thấy
+    
     lw $s3, 16($sp)
     lw $s2, 12($sp)
     lw $s1, 8($sp)
@@ -341,29 +384,24 @@ done_parse:
 
 # =========================================================================
 # autoCorrelation (BIASSED)
-# gamma_xx[k] = (1/N) * sum_{n=k..N-1} x[n] * x[n-k]
 # =========================================================================
 autoCorrelation:
-    lw $t3, M        # M
-    lw $t4, N        # N
-    addi $t0, $zero, 0       # k = 0
+    lw $t3, M        
+    lw $t4, N        
+    addi $t0, $zero, 0   
 
 autoCorr_outer:
     bge $t0, $t3, autoCorr_done
-
-    lwc1 $f4, float_zero      # sum = 0.0
-    move $t1, $t0             # n = k
+    lwc1 $f4, float_zero      
+    move $t1, $t0             
 
 autoCorr_inner:
     bge $t1, $t4, autoCorr_inner_done
-
-    # load x[n]
     sll $t5, $t1, 2
     la $t6, input_signal
     add $t6, $t6, $t5
     lwc1 $f0, 0($t6)
 
-    # load x[n-k]
     sub $t7, $t1, $t0
     sll $t7, $t7, 2
     la $t8, input_signal
@@ -372,17 +410,14 @@ autoCorr_inner:
 
     mul.s $f2, $f0, $f1
     add.s $f4, $f4, $f2
-
     addi $t1, $t1, 1
     j autoCorr_inner
 
 autoCorr_inner_done:
-    # divide by N (BIAS)
     mtc1 $t4, $f5
     cvt.s.w $f5, $f5
     div.s $f4, $f4, $f5
 
-    # store gamma_xx[k]
     la $t6, gamma_xx
     sll $t7, $t0, 2
     add $t6, $t6, $t7
@@ -394,32 +429,26 @@ autoCorr_inner_done:
 autoCorr_done:
     jr $ra
 
-
 # =========================================================================
 # crossCorrelation (BIASSED)
-# gamma_dx[k] = (1/N) * sum_{n=k..N-1} d[n] * x[n-k]
 # =========================================================================
 crossCorrelation:
     lw $t3, M
     lw $t4, N
-    addi $t0, $zero, 0    # k = 0
+    addi $t0, $zero, 0   
 
 crossCorr_outer:
     bge $t0, $t3, crossCorr_done
-
-    lwc1 $f4, float_zero  # sum = 0.0
-    move $t1, $t0         # n = k
+    lwc1 $f4, float_zero  
+    move $t1, $t0         
 
 crossCorr_inner:
     bge $t1, $t4, crossCorr_inner_done
-
-    # load d[n]
     sll $t5, $t1, 2
     la $t6, desired_signal
     add $t6, $t6, $t5
     lwc1 $f0, 0($t6)
 
-    # load x[n-k]
     sub $t7, $t1, $t0
     sll $t7, $t7, 2
     la $t8, input_signal
@@ -428,17 +457,14 @@ crossCorr_inner:
 
     mul.s $f2, $f0, $f1
     add.s $f4, $f4, $f2
-
     addi $t1, $t1, 1
     j crossCorr_inner
 
 crossCorr_inner_done:
-    # divide by N (BIAS)
     mtc1 $t4, $f5
     cvt.s.w $f5, $f5
     div.s $f4, $f4, $f5
 
-    # store gamma_dx[k] and gamma_vector[k]
     la $t6, gamma_dx
     sll $t7, $t0, 2
     add $t6, $t6, $t7
@@ -454,41 +480,33 @@ crossCorr_inner_done:
 crossCorr_done:
     jr $ra
 
-
 # =========================================================================
-# build_R_matrix: fill full MxM Toeplitz matrix from gamma_xx
-# R[i][j] = gamma_xx[abs(i-j)]
-# R_matrix stored row-major, max size 10x10
-# Registers:
-#  $t3=M, $t0=i, $t1=j, $t2=diff, $t5..$t7 temp
-# floats use $f0
+# build_R_matrix
 # =========================================================================
 build_R_matrix:
-    lw $t3, M          # M
-    la $t1, R_matrix   # reuse $t1 for base later (but we'll load per entry)
+    lw $t3, M           
+    la $t1, R_matrix    
     la $t2, gamma_xx
 
-    addi $t0, $zero, 0   # i = 0
+    addi $t0, $zero, 0   
 build_row_loop:
     bge $t0, $t3, build_done
-    addi $t1, $zero, 0   # j = 0
+    addi $t1, $zero, 0   
 build_col_loop:
     bge $t1, $t3, next_row_build
-    # diff = abs(i-j)
     sub $t2, $t0, $t1
     bltz $t2, pos_diff
     j use_diff
 pos_diff:
     sub $t2, $zero, $t2
 use_diff:
-    # load gamma_xx[diff]
     sll $t4, $t2, 2
     la $t5, gamma_xx
     add $t5, $t5, $t4
     lwc1 $f0, 0($t5)
-    # store to R_matrix[i][j] at offset ((i*M + j)*4)
-    mul $t6, $t0, $t3        # t6 = i*M
-    add $t6, $t6, $t1        # i*M + j
+    
+    mul $t6, $t0, $t3        
+    add $t6, $t6, $t1        
     sll $t6, $t6, 2
     la $t7, R_matrix
     add $t7, $t7, $t6
@@ -502,18 +520,7 @@ build_done:
     jr $ra
 
 # =========================================================================
-# solve_wiener_hopf: Gaussian elimination + back substitution
-# Works for M = 1..10
-# Registers mapping used in this routine:
-#  $t3 = M
-#  $t0 = i (outer loop)
-#  $t1 = j (inner)
-#  $t2 = k (row index)
-#  $t4..$t9 temporary integer regs for addresses
-# Float mapping in this routine:
-#  $f14 = pivot
-#  $f12 = zero (we will load float_zero into $f12)
-#  $f2, $f4, $f6, $f8, $f10 used as temps
+# solve_wiener_hopf
 # =========================================================================
 solve_wiener_hopf:
     lw $t3, M
@@ -521,7 +528,6 @@ solve_wiener_hopf:
     la $t5, gamma_vector
     la $t6, optimize_coefficient
 
-    # Zero out optimize_coefficient area first (0..M-1)
     addi $t0, $zero, 0
 zero_x_loop:
     bge $t0, $t3, zero_x_done
@@ -534,30 +540,24 @@ zero_x_loop:
     j zero_x_loop
 zero_x_done:
 
-    # load float zero into $f12 for comparisons
     lwc1 $f12, float_zero
-
-    # Forward elimination
-    addi $t0, $zero, 0    # i = 0
+    addi $t0, $zero, 0    
 elim_outer:
     bge $t0, $t3, elim_done
 
-    # pivot = R[i][i]
-    mul $t7, $t0, $t3        # i*M
-    add $t7, $t7, $t0        # i*M + i
+    mul $t7, $t0, $t3        
+    add $t7, $t7, $t0        
     sll $t7, $t7, 2
     la $t8, R_matrix
     add $t8, $t8, $t7
-    lwc1 $f14, 0($t8)        # pivot in $f14
+    lwc1 $f14, 0($t8)        
 
-    # if pivot == 0 -> try swap with row k>i where R[k][i] != 0
     c.eq.s $f14, $f12
     bc1f pivot_nonzero
 
-    # find row to swap: k = i+1..M-1
     addi $t2, $t0, 1
 find_swap:
-    bge $t2, $t3, singular_case   # none found
+    bge $t2, $t3, singular_case   
     mul $t9, $t2, $t3
     add $t9, $t9, $t0
     sll $t9, $t9, 2
@@ -566,31 +566,27 @@ find_swap:
     lwc1 $f2, 0($t7)
     c.eq.s $f2, $f12
     bc1t no_swap_here
-    # found non-zero pivot at row k -> swap row i and k
-    addi $t1, $zero, 0           # j = 0
+    
+    addi $t1, $zero, 0            
 swap_row_loop:
     bge $t1, $t3, swap_done
-    # addr_i = R[i][j]
     mul $t9, $t0, $t3
     add $t9, $t9, $t1
     sll $t9, $t9, 2
     la $t7, R_matrix
     add $t7, $t7, $t9
     lwc1 $f4, 0($t7)
-    # addr_k = R[k][j]
     mul $t9, $t2, $t3
     add $t9, $t9, $t1
     sll $t9, $t9, 2
     la $t8, R_matrix
     add $t8, $t8, $t9
     lwc1 $f6, 0($t8)
-    # swap: store f6 into addr_i, f4 into addr_k
     s.s $f6, 0($t7)
     s.s $f4, 0($t8)
     addi $t1, $t1, 1
     j swap_row_loop
 swap_done:
-    # swap gamma_vector[i] and gamma_vector[k]
     sll $t9, $t0, 2
     la $t7, gamma_vector
     add $t7, $t7, $t9
@@ -602,7 +598,6 @@ swap_done:
     s.s $f6, 0($t7)
     s.s $f4, 0($t8)
 
-    # reload pivot after swap
     mul $t7, $t0, $t3
     add $t7, $t7, $t0
     sll $t7, $t7, 2
@@ -616,7 +611,6 @@ no_swap_here:
     j find_swap
 
 singular_case:
-    # set x[0]=1, others 0 and return
     la $t7, optimize_coefficient
     lwc1 $f2, float_one
     s.s $f2, 0($t7)
@@ -634,12 +628,10 @@ singular_done:
 
 pivot_nonzero:
 pivot_ready:
-    # normalize row i: divide row elements j=i..M-1 by pivot
     addi $t1, $zero, 0
 norm_loop:
     bge $t1, $t3, norm_done
     blt $t1, $t0, skip_norm_elem
-    # addr = R[i][j]
     mul $t9, $t0, $t3
     add $t9, $t9, $t1
     sll $t9, $t9, 2
@@ -652,7 +644,6 @@ skip_norm_elem:
     addi $t1, $t1, 1
     j norm_loop
 norm_done:
-    # normalize gamma_vector[i]
     sll $t9, $t0, 2
     la $t7, gamma_vector
     add $t7, $t7, $t9
@@ -660,52 +651,45 @@ norm_done:
     div.s $f6, $f4, $f14
     s.s $f6, 0($t7)
 
-    # eliminate below rows k = i+1..M-1
     addi $t2, $t0, 1
 elim_k_loop:
     bge $t2, $t3, next_i
-    # factor = R[k][i]
     mul $t9, $t2, $t3
     add $t9, $t9, $t0
     sll $t9, $t9, 2
     la $t7, R_matrix
     add $t7, $t7, $t9
-    lwc1 $f8, 0($t7)    # factor
+    lwc1 $f8, 0($t7)    
 
-    # for j = i..M-1: R[k][j] -= factor * R[i][j]
     addi $t1, $t0, 0
 elim_inner:
     bge $t1, $t3, elim_done_inner
-    # addr_kj
     mul $t9, $t2, $t3
     add $t9, $t9, $t1
     sll $t9, $t9, 2
     la $t7, R_matrix
     add $t7, $t7, $t9
-    lwc1 $f4, 0($t7)        # R[k][j]
-    # addr_ij
+    lwc1 $f4, 0($t7)        
     mul $t9, $t0, $t3
     add $t9, $t9, $t1
     sll $t9, $t9, 2
     la $t8, R_matrix
     add $t8, $t8, $t9
-    lwc1 $f6, 0($t8)        # R[i][j]
-    # compute new = kj - factor * ij
+    lwc1 $f6, 0($t8)        
     mul.s $f10, $f8, $f6
     sub.s $f2, $f4, $f10
     s.s $f2, 0($t7)
     addi $t1, $t1, 1
     j elim_inner
 elim_done_inner:
-    # gamma_vector[k] -= factor * gamma_vector[i]
     sll $t9, $t2, 2
     la $t7, gamma_vector
     add $t7, $t7, $t9
-    lwc1 $f4, 0($t7)   # gk
+    lwc1 $f4, 0($t7)    
     sll $t9, $t0, 2
     la $t8, gamma_vector
     add $t8, $t8, $t9
-    lwc1 $f6, 0($t8)   # gi
+    lwc1 $f6, 0($t8)    
     mul.s $f10, $f8, $f6
     sub.s $f2, $f4, $f10
     s.s $f2, 0($t7)
@@ -718,29 +702,24 @@ next_i:
     j elim_outer
 
 elim_done:
-    # Back substitution: compute x[M-1..0]
     add $t0, $t3, $zero
-    addi $t0, $t0, -1   # i = M-1
+    addi $t0, $t0, -1   
 back_sub_i:
     blt $t0, $zero, back_sub_done
-    # val = gamma_vector[i]
     sll $t9, $t0, 2
     la $t7, gamma_vector
     add $t7, $t7, $t9
-    lwc1 $f4, 0($t7)       # val
+    lwc1 $f4, 0($t7)        
 
-    # for j = i+1..M-1: val -= R[i][j] * x[j]
     addi $t1, $t0, 1
 back_inner:
     bge $t1, $t3, store_xi
-    # load R[i][j]
     mul $t9, $t0, $t3
     add $t9, $t9, $t1
     sll $t9, $t9, 2
     la $t7, R_matrix
     add $t7, $t7, $t9
     lwc1 $f6, 0($t7)
-    # load x[j]
     sll $t9, $t1, 2
     la $t8, optimize_coefficient
     add $t8, $t8, $t9
@@ -751,7 +730,6 @@ back_inner:
     j back_inner
 
 store_xi:
-    # store f4 to optimize_coefficient[i]
     sll $t9, $t0, 2
     la $t7, optimize_coefficient
     add $t7, $t7, $t9
@@ -762,23 +740,18 @@ store_xi:
 back_sub_done:
     jr $ra
 
-
 # =========================================================================
 # filter_and_mmse
-# Output:
-#   - output_signal[]
-#   - mmse
 # =========================================================================
 filter_and_mmse:
     addi $sp, $sp, -28
-	sw $ra, 0($sp)
-	sw $s0, 4($sp)
-	sw $s1, 8($sp)
-	sw $s2, 12($sp)
-	sw $s3, 16($sp)
-	sw $s4, 20($sp)
-	sw $s5, 24($sp)
-
+    sw $ra, 0($sp)
+    sw $s0, 4($sp)
+    sw $s1, 8($sp)
+    sw $s2, 12($sp)
+    sw $s3, 16($sp)
+    sw $s4, 20($sp)
+    sw $s5, 24($sp)
 
     lw $s1, N
     lw $s0, M
@@ -838,22 +811,19 @@ calc_done:
     la $t0, mmse
     swc1 $f18, 0($t0)
 
-	lw $s5, 24($sp)
-	lw $s4, 20($sp)
-	lw $s3, 16($sp)
-	lw $s2, 12($sp)
-	lw $s1, 8($sp)
-	lw $s0, 4($sp)
-	lw $ra, 0($sp)
-	addi $sp, $sp, 28
-	jr $ra
+    lw $s5, 24($sp)
+    lw $s4, 20($sp)
+    lw $s3, 16($sp)
+    lw $s2, 12($sp)
+    lw $s1, 8($sp)
+    lw $s0, 4($sp)
+    lw $ra, 0($sp)
+    addi $sp, $sp, 28
+    jr $ra
 
 
 # =========================================================================
-# write_float_proc & write_int_proc (giá»¯ nguyĂªn)
-# =========================================================================
-# =========================================================================
-# write_float_proc (ĐÃ SỬA LỖI LÀM TRÒN SỐ THẬP PHÂN)
+# write_float_proc
 # =========================================================================
 write_float_proc:
     addi $sp, $sp, -12
@@ -865,7 +835,6 @@ write_float_proc:
     c.lt.s $f12, $f0
     bc1f proc_pos
     
-    # Xử lý số âm
     move $a0, $s7
     la $a1, minus
     li $a2, 1
@@ -874,7 +843,7 @@ write_float_proc:
     sub.s $f12, $f0, $f12
 
 proc_pos:
-    cvt.w.s $f0, $f12       
+    cvt.w.s $f0, $f12        
     mfc1 $a0, $f0
     cvt.s.w $f1, $f0        
     jal write_int_proc
@@ -891,9 +860,9 @@ proc_pos:
     la $t0, half_f          
     lwc1 $f4, 0($t0)
     add.s $f2, $f2, $f4     
-    cvt.w.s $f2, $f2       
+    cvt.w.s $f2, $f2        
     mfc1 $a0, $f2
-    abs $a0, $a0           
+    abs $a0, $a0            
     jal write_int_proc
     
     lw $t1, 8($sp)
