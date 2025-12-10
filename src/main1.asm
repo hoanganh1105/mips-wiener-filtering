@@ -1,27 +1,27 @@
 # =========================================================================
 # MERGED WIENER FILTER PROGRAM - FULL FILE READING VERSION (DYNAMIC M up to 10)
-# (Đã sửa: chỉ dùng thanh ghi MIPS hợp lệ)
+# (Ä?Ă£ sá»­a: chá»‰ dĂ¹ng thanh ghi MIPS há»£p lá»‡)
 # =========================================================================
 
 .data
 # ---------------- CONFIG & DATA ----------------
 N: .word 10
-M: .word 10          # <-- Thay giá trị 1..10 tùy ý
+M: .word 10          # <-- Thay giĂ¡ trá»‹ 1..10 tĂ¹y Ă½
 
-# --- FILE PATHS (SỬA ĐÚNG ĐƯỜNG DẪN CỦA BẠN NẾU CẦN) ---
+# --- FILE PATHS (Sá»¬A Ä?Ă?NG Ä?Æ¯á»œNG DáºªN Cá»¦A Báº N Náº¾U Cáº¦N) ---
 fn_input:     .asciiz "input.txt"
 .align 2 
 fn_desired:   .asciiz "desired.txt"
 .align 2
 filename:     .asciiz "output.txt"
 
-# --- MẢNG DỮ LIỆU (KHÔNG CÒN HARD-CODE) ---
+# --- Máº¢NG Dá»® LIá»†U (KHĂ”NG CĂ’N HARD-CODE) ---
 .align 2 
 input_signal:   .space 40          # N float (10*4)
 .align 2
 desired_signal: .space 40
 
-# --- Biến lưu kết quả ---
+# --- Biáº¿n lÆ°u káº¿t quáº£ ---
 .align 2
 optimize_coefficient: .space 40    # Max M=10 -> 10*4 = 40 bytes
 .align 2
@@ -29,7 +29,7 @@ output_signal:        .space 400
 .align 2
 mmse:                 .float 0.0
 
-# --- Biến trung gian ---
+# --- Biáº¿n trung gian ---
 .align 2
 # gamma_xx[0..9], gamma_dx[0..9]
 gamma_xx:   .float 0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0
@@ -106,64 +106,9 @@ main:
     move $s7, $v0
     blt $s7, 0, file_error
 
-    # Load params for filtering/printing
-    lw $s1, N
-    lw $s0, M
-    la $s2, optimize_coefficient
-    la $s3, input_signal
-    la $s4, desired_signal
-    la $s5, output_signal
-
-    li $t0, 0
-    lwc1 $f20, float_zero
-
-loop_calc:
-    bge $t0, $s1, done_calc
-    lwc1 $f0, float_zero
-    li $t1, 0
-
-inner_loop:
-    bge $t1, $s0, end_inner
-    sub $t2, $t0, $t1
-    blt $t2, $zero, skip_mul
-
-    sll $t3, $t2, 2
-    add $t3, $t3, $s3
-    lwc1 $f2, 0($t3)
-
-    sll $t3, $t1, 2
-    add $t3, $t3, $s2
-    lwc1 $f4, 0($t3)
-
-    mul.s $f6, $f2, $f4
-    add.s $f0, $f0, $f6
-
-skip_mul:
-    addi $t1, $t1, 1
-    j inner_loop
-
-end_inner:
-    sll $t3, $t0, 2
-    add $t3, $t3, $s5
-    swc1 $f0, 0($t3)
-
-    sll $t3, $t0, 2
-    add $t3, $t3, $s4
-    lwc1 $f8, 0($t3)
-
-    sub.s $f10, $f8, $f0
-    mul.s $f10, $f10, $f10
-    add.s $f20, $f20, $f10
-
-    addi $t0, $t0, 1
-    j loop_calc
-
-done_calc:
-    mtc1 $s1, $f16
-    cvt.s.w $f16, $f16
-    div.s $f18, $f20, $f16
-    la $t0, mmse
-    swc1 $f18, 0($t0)
+	jal filter_and_mmse
+	lw $s1, N
+	la $s5, output_signal
 
     # Print filtered header & then numbers
     la $a0, filtered_msg
@@ -281,7 +226,7 @@ read_error:
     syscall
 
 # =========================================================================
-# read_file_proc (giữ nguyên)
+# read_file_proc (giá»¯ nguyĂªn)
 # =========================================================================
 read_file_proc:
     addi $sp, $sp, -20
@@ -819,8 +764,95 @@ store_xi:
 back_sub_done:
     jr $ra
 
+
 # =========================================================================
-# write_float_proc & write_int_proc (giữ nguyên)
+# filter_and_mmse
+# Output:
+#   - output_signal[]
+#   - mmse
+# =========================================================================
+filter_and_mmse:
+    addi $sp, $sp, -28
+	sw $ra, 0($sp)
+	sw $s0, 4($sp)
+	sw $s1, 8($sp)
+	sw $s2, 12($sp)
+	sw $s3, 16($sp)
+	sw $s4, 20($sp)
+	sw $s5, 24($sp)
+
+
+    lw $s1, N
+    lw $s0, M
+    la $s2, optimize_coefficient
+    la $s3, input_signal
+    la $s4, desired_signal
+    la $s5, output_signal
+
+    li $t0, 0
+    lwc1 $f20, float_zero
+
+calc_loop:
+    bge $t0, $s1, calc_done
+    lwc1 $f0, float_zero
+    li $t1, 0
+
+inner_loop2:
+    bge $t1, $s0, inner_done2
+    sub $t2, $t0, $t1
+    blt $t2, $zero, skip_mul2
+
+    sll $t3, $t2, 2
+    add $t3, $t3, $s3
+    lwc1 $f2, 0($t3)
+
+    sll $t3, $t1, 2
+    add $t3, $t3, $s2
+    lwc1 $f4, 0($t3)
+
+    mul.s $f6, $f2, $f4
+    add.s $f0, $f0, $f6
+
+skip_mul2:
+    addi $t1, $t1, 1
+    j inner_loop2
+
+inner_done2:
+    sll $t3, $t0, 2
+    add $t3, $t3, $s5
+    swc1 $f0, 0($t3)
+
+    sll $t3, $t0, 2
+    add $t3, $t3, $s4
+    lwc1 $f8, 0($t3)
+
+    sub.s $f10, $f8, $f0
+    mul.s $f10, $f10, $f10
+    add.s $f20, $f20, $f10
+
+    addi $t0, $t0, 1
+    j calc_loop
+
+calc_done:
+    mtc1 $s1, $f16
+    cvt.s.w $f16, $f16
+    div.s $f18, $f20, $f16
+    la $t0, mmse
+    swc1 $f18, 0($t0)
+
+	lw $s5, 24($sp)
+	lw $s4, 20($sp)
+	lw $s3, 16($sp)
+	lw $s2, 12($sp)
+	lw $s1, 8($sp)
+	lw $s0, 4($sp)
+	lw $ra, 0($sp)
+	addi $sp, $sp, 28
+	jr $ra
+
+
+# =========================================================================
+# write_float_proc & write_int_proc (giá»¯ nguyĂªn)
 # =========================================================================
 write_float_proc:
     addi $sp, $sp, -12
