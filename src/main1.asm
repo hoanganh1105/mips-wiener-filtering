@@ -1,27 +1,25 @@
 # =========================================================================
 # MERGED WIENER FILTER PROGRAM - FULL FILE READING VERSION (DYNAMIC M up to 10)
-# (Ä?Ă£ sá»­a: chá»‰ dĂ¹ng thanh ghi MIPS há»£p lá»‡)
 # =========================================================================
 
 .data
 # ---------------- CONFIG & DATA ----------------
 N: .word 10
-M: .word 10          # <-- Thay giĂ¡ trá»‹ 1..10 tĂ¹y Ă½
+M: .word 10          
 
-# --- FILE PATHS (Sá»¬A Ä?Ă?NG Ä?Æ¯á»œNG DáºªN Cá»¦A Báº N Náº¾U Cáº¦N) ---
 fn_input:     .asciiz "input.txt"
 .align 2 
 fn_desired:   .asciiz "desired.txt"
 .align 2
 filename:     .asciiz "output.txt"
 
-# --- Máº¢NG Dá»® LIá»†U (KHĂ”NG CĂ’N HARD-CODE) ---
+
 .align 2 
 input_signal:   .space 40          # N float (10*4)
 .align 2
 desired_signal: .space 40
 
-# --- Biáº¿n lÆ°u káº¿t quáº£ ---
+
 .align 2
 optimize_coefficient: .space 40    # Max M=10 -> 10*4 = 40 bytes
 .align 2
@@ -854,38 +852,50 @@ calc_done:
 # =========================================================================
 # write_float_proc & write_int_proc (giá»¯ nguyĂªn)
 # =========================================================================
+# =========================================================================
+# write_float_proc (ĐÃ SỬA LỖI LÀM TRÒN SỐ THẬP PHÂN)
+# =========================================================================
 write_float_proc:
     addi $sp, $sp, -12
     sw $ra, 0($sp)
     sw $t0, 4($sp)
     sw $t1, 8($sp)
+    
     lwc1 $f0, float_zero
     c.lt.s $f12, $f0
     bc1f proc_pos
+    
+    # Xử lý số âm
     move $a0, $s7
     la $a1, minus
     li $a2, 1
     li $v0, 15
     syscall
     sub.s $f12, $f0, $f12
+
 proc_pos:
-    cvt.w.s $f0, $f12
+    cvt.w.s $f0, $f12       
     mfc1 $a0, $f0
-    cvt.s.w $f1, $f0
+    cvt.s.w $f1, $f0        
     jal write_int_proc
     move $a0, $s7
     la $a1, dot
     li $a2, 1
     li $v0, 15
     syscall
-    sub.s $f2, $f12, $f1
+    
+    sub.s $f2, $f12, $f1    
     la $t0, ten_f
     lwc1 $f3, 0($t0)
-    mul.s $f2, $f2, $f3
-    cvt.w.s $f2, $f2
+    mul.s $f2, $f2, $f3    
+    la $t0, half_f          
+    lwc1 $f4, 0($t0)
+    add.s $f2, $f2, $f4     
+    cvt.w.s $f2, $f2       
     mfc1 $a0, $f2
-    abs $a0, $a0
+    abs $a0, $a0           
     jal write_int_proc
+    
     lw $t1, 8($sp)
     lw $t0, 4($sp)
     lw $ra, 0($sp)
