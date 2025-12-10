@@ -56,7 +56,6 @@ dot:          .asciiz "."
 # --- ERROR MESSAGES ---
 err_msg:      .asciiz "Error: cannot open output file\n"
 err_read_msg: .asciiz "Error: cannot open input/desired file\n"
-# Chuỗi lỗi này dài 21 ký tự
 err_size_msg: .asciiz "Error: size not match" 
 
 int_buf:      .space 20
